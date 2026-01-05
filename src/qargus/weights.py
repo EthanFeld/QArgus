@@ -7,6 +7,7 @@ import numpy as np
 from blockflow import BlockEncoding, ResourceEstimate, SuccessModel
 
 from .operators import Convolution2DOperator, DenseOperator
+from .resource_estimation import estimate_conv_resources, estimate_dense_resources
 
 
 def conv_filters_from_keras(kernel: np.ndarray) -> np.ndarray:
@@ -60,7 +61,7 @@ def _build_conv_block(
     return BlockEncoding(
         op=conv_op,
         alpha=float(np.linalg.norm(filters)),
-        resources=ResourceEstimate(),
+        resources=estimate_conv_resources(conv_op),
         success=SuccessModel(),
     )
 
@@ -113,7 +114,7 @@ def load_classifier_weights(model: object, weights: np.ndarray) -> None:
     dense_block = BlockEncoding(
         op=DenseOperator(square_mat),
         alpha=float(np.linalg.norm(square_mat)),
-        resources=ResourceEstimate(),
+        resources=estimate_dense_resources(square_mat),
         success=SuccessModel(),
     )
     model.classifier = dense_block

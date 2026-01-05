@@ -5,14 +5,18 @@ from typing import Callable, Tuple
 
 import numpy as np
 
+_HAS_NP_ERF = hasattr(np, "erf")
+_VECTORIZED_ERF = np.vectorize(math.erf)
+
 
 def _sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-x))
 
 
 def _erf(x: np.ndarray) -> np.ndarray:
-    vec_erf = np.vectorize(math.erf)
-    return vec_erf(x)
+    if _HAS_NP_ERF:
+        return np.erf(x)
+    return _VECTORIZED_ERF(x)
 
 
 def chebyshev_approximation(

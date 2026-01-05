@@ -21,12 +21,14 @@ from .encoding import (
     pad_1d,
 )
 from .operators import Convolution2DOperator, DenseOperator
+from .resource_estimation import estimate_conv_resources, estimate_dense_resources
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
     shifted = logits - np.max(logits)
-    exps = np.exp(shifted)
-    return exps / np.sum(exps)
+    np.exp(shifted, out=shifted)
+    shifted /= np.sum(shifted)
+    return shifted
 
 
 @dataclass(frozen=True)
@@ -92,7 +94,7 @@ class QuantumResNet:
             conv_block = BlockEncoding(
                 op=conv_op,
                 alpha=float(np.linalg.norm(filters)),
-                resources=ResourceEstimate(),
+                resources=estimate_conv_resources(conv_op),
                 success=SuccessModel(),
             )
             block = ResidualBlock(
@@ -116,7 +118,7 @@ class QuantumResNet:
             dense_block = BlockEncoding(
                 op=DenseOperator(square_mat),
                 alpha=float(np.linalg.norm(square_mat)),
-                resources=ResourceEstimate(),
+                resources=estimate_dense_resources(square_mat),
                 success=SuccessModel(),
             )
             self.classifier = dense_block
@@ -180,8 +182,7 @@ class QuantumResNet:
         squared = elementwise_square(pooled.encoded, trace=pooled.trace, epsilon=self.config.square_error)
         probs = squared.encoded.encoding.semantic_state()
         total = float(np.sum(probs))
-        if total > 0.0:
-            probs = probs / total
+        probs = probs / total
         logits = np.log(probs + 1e-12)
         return ForwardResult(
             logits=logits,

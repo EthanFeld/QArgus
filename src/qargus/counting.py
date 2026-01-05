@@ -30,13 +30,13 @@ def estimate_count(
     estimate and tracks oracle query complexity. The phase estimate is mapped
     to the principal range [0, 1/2] to account for the two Grover eigenphases.
     """
-    marks_list = list(marks)
-    if not marks_list:
+    marks_arr = np.fromiter(marks, dtype=bool)
+    if marks_arr.size == 0:
         raise ValueError("marks must be non-empty")
     if precision_bits <= 0:
         raise ValueError("precision_bits must be positive")
-    num_items = len(marks_list)
-    true_count = int(np.sum(marks_list))
+    num_items = int(marks_arr.size)
+    true_count = int(np.count_nonzero(marks_arr))
     frac = true_count / num_items
     theta = math.asin(math.sqrt(frac)) if frac > 0 else 0.0
     scale = 2 ** precision_bits

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Iterable, Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -82,15 +82,6 @@ def encoded_from_array(
         epsilon=epsilon,
     )
     return EncodedTensor(encoding=encoding, shape=arr.shape)
-
-
-def reshape(encoded: EncodedTensor, shape: Tuple[int, ...]) -> EncodedTensor:
-    """
-    Return a new EncodedTensor with the same vector data and a new shape.
-    """
-    if _shape_size(shape) != encoded.dimension:
-        raise ValueError("reshape size does not match encoded dimension")
-    return EncodedTensor(encoding=encoded.encoding, shape=shape)
 
 
 def flatten(encoded: EncodedTensor) -> EncodedTensor:
@@ -176,7 +167,8 @@ def elementwise_square(
     Element-wise square of amplitudes (|x|^2). Returns a real vector.
     """
     vec = encoded.encoding.semantic_state()
-    squared = np.abs(vec) ** 2
+    squared = np.abs(vec)
+    squared *= squared
     encoding = VectorEncoding.from_vector(
         squared,
         resources=ResourceEstimate(),
@@ -205,7 +197,7 @@ def l2_pool_1d(
     if vec.shape[0] % pool != 0:
         raise ValueError("pool size must divide vector length")
     grouped = vec.reshape(-1, pool)
-    pooled = np.sqrt(np.sum(np.abs(grouped) ** 2, axis=1))
+    pooled = np.linalg.norm(grouped, axis=1)
     encoding = VectorEncoding.from_vector(
         pooled,
         resources=ResourceEstimate(),
@@ -244,31 +236,6 @@ def vector_sum(
     return _with_trace(out, trace, resources=encoding.resources, success_prob=encoding.success.success_prob, epsilon=epsilon)
 
 
-def concat(
-    tensors: Iterable[EncodedTensor],
-    *,
-    axis: int = 0,
-    trace: Optional[Trace] = None,
-    epsilon: float = 0.0,
-) -> VectorOpResult:
-    """
-    Concatenate semantic states along a given axis.
-    """
-    tensors_list = list(tensors)
-    if not tensors_list:
-        raise ValueError("concat requires at least one tensor")
-    states = [t.encoding.semantic_state().reshape(t.shape) for t in tensors_list]
-    cat = np.concatenate(states, axis=axis)
-    encoding = VectorEncoding.from_vector(
-        cat.reshape(-1),
-        resources=ResourceEstimate(),
-        success=SuccessModel(),
-        epsilon=sum(t.encoding.epsilon for t in tensors_list) + epsilon,
-    )
-    out = EncodedTensor(encoding=encoding, shape=cat.shape)
-    return _with_trace(out, trace, resources=encoding.resources, success_prob=encoding.success.success_prob, epsilon=epsilon)
-
-
 def apply_block_encoding(
     encoded: EncodedTensor,
     block: BlockEncoding,
@@ -297,21 +264,3 @@ def apply_block_encoding(
     out = EncodedTensor(encoding=encoding, shape=out_shape)
     return _with_trace(out, trace, resources=block.resources, success_prob=block.success.success_prob, epsilon=block.epsilon)
 
-
-def matrix_vector_with_square(
-    block: BlockEncoding,
-    encoded: EncodedTensor,
-    *,
-    out_shape: Tuple[int, ...],
-    trace: Optional[Trace] = None,
-) -> VectorOpResult:
-    """
-    Apply element-wise square then a linear block encoding.
-    """
-    squared_result = elementwise_square(encoded, trace=trace)
-    return apply_block_encoding(
-        squared_result.encoded,
-        block,
-        out_shape=out_shape,
-        trace=squared_result.trace,
-    )

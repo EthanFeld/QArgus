@@ -32,11 +32,7 @@ def _pooling_matrix(padded_dim: int, pool: int) -> np.ndarray:
     if padded_dim % pool != 0:
         raise ValueError("pool must divide padded_dim")
     out_dim = padded_dim // pool
-    mat = np.zeros((out_dim, padded_dim), dtype=float)
-    for row in range(out_dim):
-        start = row * pool
-        mat[row, start:start + pool] = 1.0
-    return mat
+    return np.kron(np.eye(out_dim, dtype=float), np.ones(pool, dtype=float))
 
 
 def _max_block_dim(blocks: Iterable[object], fallback: int) -> int:
@@ -138,8 +134,10 @@ def build_regime3_unitary_circuit(
             )
 
         block_circ = QuantumCircuit(n_data + block_anc + 1)
-        block_circ.append(conv_gate, data_qubits[:conv_data_qubits] + ancillas)
-        block_circ.append(act_gate, data_qubits[:conv_data_qubits] + [act_qubit])
+        local_ancillas = list(range(n_data, n_data + block_anc))
+        local_act_qubit = n_data + block_anc
+        block_circ.append(conv_gate, data_qubits[:conv_data_qubits] + local_ancillas)
+        block_circ.append(act_gate, data_qubits[:conv_data_qubits] + [local_act_qubit])
         block_gate = _as_gate(block_circ, f"Block_{idx}")
 
         identity = QuantumCircuit(n_data + block_anc + 1)
@@ -155,7 +153,7 @@ def build_regime3_unitary_circuit(
         lcu_qubits = [select_qubit] + data_qubits + ancillas + [act_qubit]
         qc.append(lcu.to_gate(), lcu_qubits)
 
-    if include_output and output_spec is not None:
+    if include_output:
         if output_spec[0] == "classifier":
             _, cls_circ, cls_anc = output_spec
             ancillas = list(range(next_qubit, next_qubit + cls_anc))

@@ -6,7 +6,6 @@ from typing import Iterable, List, Optional
 import numpy as np
 
 from .encoding import (
-    VectorOpResult,
     apply_block_encoding,
     encoded_from_array,
     elementwise_square,
@@ -28,9 +27,67 @@ def _pad_state(vec: np.ndarray, target_dim: int) -> np.ndarray:
     return padded
 
 
-def _state_from_encoded(result: VectorOpResult, target_dim: int) -> np.ndarray:
-    state = result.encoded.encoding.semantic_state().reshape(-1)
-    return _pad_state(state, target_dim)
+def _normalize_state(vec: np.ndarray) -> np.ndarray:
+    arr = np.asarray(vec)
+    if arr.ndim != 1:
+        raise ValueError("state vector must be 1D for state preparation")
+    finite_mask = np.isfinite(arr)
+    if not np.all(finite_mask):
+        bad = arr.size - int(np.sum(finite_mask))
+        raise ValueError(f"state vector contains {bad} non-finite entries")
+    max_abs = float(np.max(np.abs(arr)))
+    if math.isclose(max_abs, 0.0):
+        raise ValueError("cannot normalize a zero vector for state preparation")
+    scaled = arr / max_abs
+    norm = float(np.linalg.norm(scaled))
+    if math.isclose(norm, 1.0):
+        return scaled
+    return scaled / norm
+
+
+def _has_state_preparation(qc: object) -> bool:
+    for inst in getattr(qc, "data", []):
+        name = getattr(getattr(inst, "operation", None), "name", "")
+        if name in ("state_preparation", "state_preparation_dg"):
+            return True
+    return False
+
+
+def _normalize_state_preparations(qc: object) -> object:
+    from qiskit import QuantumCircuit
+    from qiskit.circuit.library import StatePreparation
+
+    data = list(getattr(qc, "data", []))
+    if not data:
+        return qc
+
+    new_qc = QuantumCircuit(*getattr(qc, "qregs", []), *getattr(qc, "cregs", []), name=qc.name)
+    new_qc.global_phase = getattr(qc, "global_phase", 0.0)
+
+    for inst in data:
+        op = getattr(inst, "operation", None)
+        name = getattr(op, "name", "")
+        if name in ("state_preparation", "state_preparation_dg"):
+            params = np.asarray(getattr(op, "params", []), dtype=np.complex128).reshape(-1)
+            normalized = _normalize_state(params)
+            new_op = StatePreparation(normalized, normalize=False)
+            if name == "state_preparation_dg" or getattr(op, "_inverse", False):
+                new_op = new_op.inverse()
+            new_qc.append(new_op, inst.qubits, inst.clbits)
+        else:
+            new_qc.append(op, inst.qubits, inst.clbits)
+    return new_qc
+
+
+def _decompose_state_preparation(qc: object, max_passes: int = 3) -> object:
+    if not _has_state_preparation(qc):
+        return qc
+    decomposed = _normalize_state_preparations(qc)
+    for _ in range(max_passes):
+        if not _has_state_preparation(decomposed):
+            break
+        decomposed = decomposed.decompose()
+    return decomposed
 
 
 def _collect_states(model: object, x: np.ndarray) -> List[np.ndarray]:
@@ -94,16 +151,10 @@ def model_to_qasm(
     strategy uses a unitary Regime-3 circuit; set strategy="state" to export the
     per-layer state preparation diagnostic.
     """
-    try:
-        from qiskit import QuantumCircuit, transpile
-        from qiskit.circuit.library import StatePreparation
-        from qiskit_aer import Aer
-        try:
-            from qiskit.qasm2 import dumps as qasm2_dumps
-        except Exception:  # pragma: no cover - older qiskit
-            qasm2_dumps = None
-    except Exception as exc:  # pragma: no cover - requires qiskit+aer
-        raise ImportError("qiskit and qiskit-aer are required for QASM export") from exc
+    from qiskit import QuantumCircuit, transpile
+    from qiskit.circuit.library import StatePreparation
+    from qiskit.qasm2 import dumps as qasm2_dumps
+    from qiskit_aer import Aer
 
     x = np.asarray(input_state)
     expected_shape = getattr(model, "config").input_shape
@@ -118,17 +169,18 @@ def model_to_qasm(
         max_dim = max(state.shape[0] for state in states)
         num_qubits = int(math.ceil(math.log2(max_dim)))
         target_dim = 2 ** num_qubits
-        padded_states = [_pad_state(state, target_dim) for state in states]
+        normalized_states = [_normalize_state(state) for state in states]
+        padded_states = [_pad_state(state, target_dim) for state in normalized_states]
 
         qc = QuantumCircuit(num_qubits, num_qubits if include_measurements else 0)
-        qc.append(StatePreparation(padded_states[0]), qc.qubits)
+        qc.append(StatePreparation(padded_states[0], normalize=True), qc.qubits)
         qc.barrier()
 
         if per_layer:
             prev = padded_states[0]
             for state in padded_states[1:]:
-                qc.append(StatePreparation(prev).inverse(), qc.qubits)
-                qc.append(StatePreparation(state), qc.qubits)
+                qc.append(StatePreparation(prev, normalize=True).inverse(), qc.qubits)
+                qc.append(StatePreparation(state, normalize=True), qc.qubits)
                 qc.barrier()
                 prev = state
     else:
@@ -136,13 +188,19 @@ def model_to_qasm(
         num_qubits = core.num_qubits
         target_dim = 2 ** int(regime3_data_qubits(model))
         state = encoded_from_array(x).encoding.semantic_state().reshape(-1)
-        padded_state = _pad_state(state, target_dim)
+        normalized_state = _normalize_state(state)
+        padded_state = _pad_state(normalized_state, target_dim)
         qc = QuantumCircuit(num_qubits, num_qubits if include_measurements else 0)
-        qc.append(StatePreparation(padded_state), list(range(int(regime3_data_qubits(model)))))
+        qc.append(
+            StatePreparation(padded_state, normalize=True),
+            list(range(int(regime3_data_qubits(model)))),
+        )
         qc.append(core.to_gate(), qc.qubits)
 
     if include_measurements:
         qc.measure(qc.qubits, qc.clbits)
+
+    qc = _decompose_state_preparation(qc)
 
     backend = Aer.get_backend("aer_simulator")
     if basis_gates is None:
@@ -154,8 +212,4 @@ def model_to_qasm(
             basis_gates=list(basis_gates),
             optimization_level=optimization_level,
         )
-    if qasm2_dumps is not None:
-        return qasm2_dumps(transpiled)
-    if hasattr(transpiled, "qasm"):
-        return transpiled.qasm()
-    raise RuntimeError("Unable to export QASM from this qiskit version")
+    return qasm2_dumps(transpiled)

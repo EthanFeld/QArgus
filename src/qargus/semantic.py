@@ -89,12 +89,11 @@ class Regime3OutputStep:
         if pool <= 0 or vec.shape[0] % pool != 0:
             raise ValueError("invalid pool size for output dimension")
         grouped = vec.reshape(-1, pool)
-        pooled = np.sqrt(np.sum(np.abs(grouped) ** 2, axis=1))
+        pooled = np.linalg.norm(grouped, axis=1)
         pooled = _l2_normalize(pooled)
         squared = np.abs(pooled) ** 2
         total = float(np.sum(squared))
-        if total > 0.0:
-            squared = squared / total
+        squared = squared / total
         state.data = squared
 
 

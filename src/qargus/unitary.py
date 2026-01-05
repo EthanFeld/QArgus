@@ -1,22 +1,13 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from typing import Iterable, Optional, Tuple
 
 import numpy as np
 
 from .activations import chebyshev_approximation
-from .operators import Convolution2DOperator, DenseOperator
-
-
-def _pad_to_power_of_two(vec: np.ndarray) -> np.ndarray:
-    dim = vec.shape[0]
-    target = 1 << int(math.ceil(math.log2(dim)))
-    if target == dim:
-        return vec
-    padded = np.zeros(target, dtype=vec.dtype)
-    padded[:dim] = vec
-    return padded
+from .operators import DenseOperator
 
 
 def _pad_matrix_to_power_of_two(mat: np.ndarray) -> np.ndarray:
@@ -77,6 +68,8 @@ def operator_to_matrix(op: object) -> np.ndarray:
     """
     Explicitly materialize a linear operator into a dense matrix.
     """
+    if isinstance(op, DenseOperator):
+        return np.array(op.mat, copy=True)
     if hasattr(op, "shape"):
         out_dim, in_dim = op.shape
     else:
@@ -89,16 +82,32 @@ def operator_to_matrix(op: object) -> np.ndarray:
     return mat
 
 
-def conv_operator_to_matrix(op: Convolution2DOperator) -> np.ndarray:
-    return operator_to_matrix(op)
-
-
-def dense_operator_to_matrix(op: DenseOperator) -> np.ndarray:
-    return operator_to_matrix(op)
-
-
 def chebyshev_to_monomial(coeffs: np.ndarray) -> np.ndarray:
     return np.polynomial.chebyshev.cheb2poly(coeffs)
+
+
+@lru_cache(maxsize=64)
+def _cached_erf_coeffs(
+    degree: int,
+    domain: Tuple[float, float],
+    scale: float,
+    use_np_erf: bool,
+) -> np.ndarray:
+    if use_np_erf:
+        def _erf_vec(x: np.ndarray) -> np.ndarray:
+            return np.erf(scale * x)
+    else:
+        vec_erf = np.vectorize(math.erf)
+
+        def _erf_vec(x: np.ndarray) -> np.ndarray:
+            return vec_erf(scale * x)
+
+    coeffs = chebyshev_approximation(
+        _erf_vec,
+        degree=degree,
+        domain=domain,
+    )
+    return coeffs
 
 
 def erf_polynomial_coeffs(
@@ -107,10 +116,11 @@ def erf_polynomial_coeffs(
     domain: Tuple[float, float] = (-1.0, 1.0),
     scale: float = 1.0,
 ) -> np.ndarray:
-    coeffs = chebyshev_approximation(
-        np.vectorize(lambda x: math.erf(scale * x)),
-        degree=degree,
-        domain=domain,
+    coeffs = _cached_erf_coeffs(
+        int(degree),
+        (float(domain[0]), float(domain[1])),
+        float(scale),
+        hasattr(np, "erf"),
     )
     return chebyshev_to_monomial(coeffs)
 
@@ -141,7 +151,13 @@ def block_encoding_circuit(
     """
     from qiskit import QuantumCircuit
 
-    unitary, chosen_alpha = block_encoding_unitary(matrix, alpha=alpha)
+    chosen_alpha = alpha
+    if chosen_alpha is not None:
+        mat_norm = float(np.linalg.norm(np.asarray(matrix), ord=2))
+        if chosen_alpha < mat_norm:
+            chosen_alpha = mat_norm
+        chosen_alpha *= 1.0000001
+    unitary, chosen_alpha = block_encoding_unitary(matrix, alpha=chosen_alpha)
     dim = unitary.shape[0]
     num_qubits = int(math.log2(dim))
     qc = QuantumCircuit(num_qubits, name=f"{name}_alpha_{chosen_alpha:.3f}")
@@ -266,23 +282,6 @@ def lcu_two_unitaries(
     return qc
 
 
-def grover_amplify(oracle, state_prep, iterations: int, name: str = "GroverAmp"):
-    """
-    Build a Grover-style amplitude amplification circuit.
-    """
-    from qiskit import QuantumCircuit
-    from qiskit.circuit.library import GroverOperator
-
-    if iterations < 0:
-        raise ValueError("iterations must be non-negative")
-    grover = GroverOperator(oracle, state_prep=state_prep, name=name)
-    qc = QuantumCircuit(state_prep.num_qubits)
-    qc.append(state_prep, qc.qubits)
-    for _ in range(iterations):
-        qc.append(grover, qc.qubits)
-    return qc
-
-
 def polynomial_rotation_circuit(
     num_state_qubits: int,
     coeffs: Iterable[float],
@@ -334,7 +333,7 @@ def l2_pool_values(vec: np.ndarray, pool: int) -> np.ndarray:
     if arr.shape[0] % pool != 0:
         raise ValueError("pool must divide vector length")
     grouped = arr.reshape(-1, pool)
-    pooled = np.sqrt(np.sum(np.abs(grouped) ** 2, axis=1))
+    pooled = np.linalg.norm(grouped, axis=1)
     return pooled
 
 

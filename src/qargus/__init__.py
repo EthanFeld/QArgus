@@ -1,4 +1,4 @@
-"""Lean semantic implementation of Regime-3 primitives from LottoTicketAttempt2."""
+"""Lean semantic Regime-3 prototype from Rattew et al. (arXiv:2510.07195)."""
 
 from .encoding import (
     EncodedTensor,
@@ -9,9 +9,7 @@ from .encoding import (
     l2_pool_1d,
     pad_1d,
     vector_sum,
-    concat,
     flatten,
-    reshape,
 )
 from .operators import Convolution2DOperator, DenseOperator
 from .activations import activation_apply, chebyshev_approximation
@@ -59,9 +57,7 @@ __all__ = [
     "l2_pool_1d",
     "pad_1d",
     "vector_sum",
-    "concat",
     "flatten",
-    "reshape",
     "Convolution2DOperator",
     "DenseOperator",
     "activation_apply",

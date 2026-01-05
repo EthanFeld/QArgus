@@ -7,6 +7,7 @@ from blockflow import BlockEncoding, ResourceEstimate, SuccessModel, VectorEncod
 
 from .activations import activation_apply
 from .encoding import EncodedTensor, Trace, VectorOpResult, apply_block_encoding, l2_normalize, vector_sum
+from .resource_estimation import estimate_activation_resources
 
 
 def _infer_conv_shape(block: BlockEncoding, default: Tuple[int, ...]) -> Tuple[int, ...]:
@@ -50,7 +51,7 @@ class ResidualBlock:
         )
         act_encoding = VectorEncoding.from_vector(
             act_vec.reshape(-1),
-            resources=ResourceEstimate(),
+            resources=self._activation_resources(result.encoded.dimension),
             success=SuccessModel(),
             epsilon=result.encoded.encoding.epsilon + self.activation_error,
         )
@@ -64,3 +65,12 @@ class ResidualBlock:
         if result.encoded.dimension == encoded.dimension:
             result = vector_sum(encoded, result.encoded, tau=self.skip_tau, trace=result.trace)
         return l2_normalize(result.encoded, trace=result.trace, epsilon=self.normalize_error)
+
+    def _activation_resources(self, dim: int) -> ResourceEstimate:
+        if self.activation == "identity":
+            return ResourceEstimate()
+        if self.approx_coeffs is not None:
+            degree = max(1, int(len(self.approx_coeffs) - 1))
+        else:
+            degree = 5
+        return estimate_activation_resources(dim, degree=degree)
