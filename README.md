@@ -3,20 +3,14 @@
 QArgus is a lean, semantic (statevector-level) prototype of the Regime-3 constructions in
 A. G. Rattew, P.-W. Huang, N. Guo, L. A. Pira, and P. Rebentrost,
 "Accelerating Inference for Multilayer Neural Networks with Quantum Computers"
-(arXiv:2510.07195, 2025). It builds on the `qublock` package and focuses on a toy but complete
-pipeline that is small enough to run on a laptop while exposing the key primitives:
+(arXiv:2510.07195, 2025). It builds on the `qublock` package and focuses on a complete
+pipeline while exposing the key primitives:
 vector-encoding ops, QRAM-free convolution block encodings, non-linear activations,
 residual blocks, and a semantic quantum-counting estimator.
 
-## Scope
-- Regime 3 (no QRAM) only.
-- Semantic execution only (no end-to-end circuit synthesis beyond QuBlock primitives).
-- Toy-scale models and datasets.
-- Output block mirrors Figure 1(c) in the paper: flatten + normalize + L2 pool + square
-  (set `output_mode="classifier"` for a dense classifier head).
 
-## Theory Summary (Regime 3)
-Regime 3 uses amplitude encoding and block encodings to apply linear layers without QRAM.
+## Theory Summary
+This repository uses amplitude encoding and block encodings to apply linear layers without QRAM.
 This repository simulates those constructions at the statevector level and tracks success
 probabilities and approximation error without building full circuits by default.
 
@@ -198,19 +192,3 @@ pytest
 
 ## License
 MIT. See `LICENSE`.
-
-## Citation
-If you use this repository, please cite:
-
-Rattew, A. G., Huang, P.-W., Guo, N., Pira, L. A., and Rebentrost, P.
-"Accelerating Inference for Multilayer Neural Networks with Quantum Computers."
-arXiv:2510.07195 (2025).
-
-```bibtex
-@article{rattew2025accelerating,
-  title={Accelerating Inference for Multilayer Neural Networks with Quantum Computers},
-  author={Rattew, Arthur G. and Huang, Po-Wei and Guo, Naixu and Pira, Lirand A. and Rebentrost, Patrick},
-  journal={arXiv preprint arXiv:2510.07195},
-  year={2025}
-}
-```
